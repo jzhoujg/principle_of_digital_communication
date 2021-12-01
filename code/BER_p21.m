@@ -1,0 +1,109 @@
+clc;
+clear all;
+close all;
+%source_code = [1,0,0,1,0,1,1]; % data
+%source_encode =[source_code,mod(sum(source_code),2)];% 
+errobits = 0;
+total = 0;
+ber_snr = [];
+
+Power = 4 ;
+for(j=1:1:12)
+    errobits = 0;
+    total = 0;
+while errobits < 200
+    SNR = j ;    
+    n = 40;
+    total = total + n;
+    source=randi([0,1],[1,n]);% Montecarlo Method
+    source_encode = (lteTurboEncode(source))';
+    %source_encode =  source;
+    pilot = [0,0,0,1,1,0,1,1];
+    source_encode = [pilot,pilot,pilot,source_encode];
+    data = 2 * source_encode -1  ;
+    s_p_data = double(reshape(data,2,length(data)/2));
+    y=[];
+    y_in=[]; % I
+    y_qd=[]; % Q
+
+    for(i=1:length(data)/2)
+        y1=s_p_data(1,i); % inphase component
+        y2=s_p_data(2,i)*1j ;% Quadrature component
+        y_in=[y_in y1]; % inphase signal vector
+        y_qd=[y_qd y2]; %quadrature signal vector
+        y=[y y1+y2]; % modulated signal vector
+    end
+
+    Tx_sig=y; % transmitting signal after modulation
+    Tx_sig_relay = sqrt(Power)* y;
+    
+    % XXXXXXXXXXXXXXXXXXXXXXXXXXXX channel XXXXXXXXXXXXXXXXXXXXXXXXXX
+
+    rayleighchan = comm.RayleighChannel('SampleRate',n,'MaximumDopplerShift',0.0001);
+    Tx_sig=(rayleighchan((Tx_sig)'))';
+    
+    rayleighchan_relay = comm.RayleighChannel('SampleRate',n,'MaximumDopplerShift',0.0001);
+    Tx_sig_relay=(rayleighchan_relay((Tx_sig_relay)'))';
+    
+    Rx_sig = awgn(Tx_sig,SNR,'measured'); 
+    Rx_relay = awgn(Tx_sig_relay,SNR); 
+
+    %pre_process%
+
+    pilot_receive = Rx_sig(1:12);
+    Rx_sig = Rx_sig(13:length(Rx_sig));
+
+    P1 = (pilot_receive(1)+ pilot_receive(5)+ pilot_receive(9))/3;
+    P2 = (pilot_receive(2)+ pilot_receive(6)+ pilot_receive(10))/3;
+    P3 = (pilot_receive(3)+ pilot_receive(7)+ pilot_receive(11))/3;
+    P4 = (pilot_receive(4)+ pilot_receive(8)+ pilot_receive(12))/3;
+
+    Rx_data=[];
+    
+    pilot_receive_r = Rx_relay(1:12);
+    Rx_sig_r = Rx_relay(13:length(Rx_relay));
+
+    P1_r = (pilot_receive_r(1)+ pilot_receive_r(5)+ pilot_receive_r(9))/3;
+    P2_r = (pilot_receive_r(2)+ pilot_receive_r(6)+ pilot_receive_r(10))/3;
+    P3_r = (pilot_receive_r(3)+ pilot_receive_r(7)+ pilot_receive_r(11))/3;
+    P4_r = (pilot_receive_r(4)+ pilot_receive_r(8)+ pilot_receive_r(12))/3;
+
+    for(i=1:1:(length(data)-24)/2)
+       d = [];
+       d(1) = abs(Rx_sig(i)-P1)+Power*abs(Rx_sig_r(i)-P1_r);
+       d(2) = abs(Rx_sig(i)-P2)+Power*abs(Rx_sig_r(i)-P2_r);
+       d(3) = abs(Rx_sig(i)-P3)+Power*abs(Rx_sig_r(i)-P3_r);
+       d(4) = abs(Rx_sig(i)-P4)+Power*abs(Rx_sig_r(i)-P4_r);
+       
+%        d(1) = abs(Rx_sig(i)-P1);
+%        d(2) = abs(Rx_sig(i)-P2);
+%        d(3) = abs(Rx_sig(i)-P3);
+%        d(4) = abs(Rx_sig(i)-P4);
+       [m,index]= min(d);
+       switch(index)
+           case 1
+               out = [0,0];
+           case 2
+               out = [0,1];
+           case 3 
+               out = [1,0];
+           otherwise
+               out = [1,1];
+       end
+       Rx_data=[Rx_data  out];
+    end
+
+
+    data_decode = (lteTurboDecode(Rx_data))';
+    %data_decode =Rx_data;
+    res = [source;data_decode];
+    num_erro = sum(xor(source,data_decode)) ;
+    errobits = num_erro +errobits;
+    BER = errobits/total;
+    % figure(3)
+    % stem(Rx_data,'linewidth',3) 
+    % title('Information after Receiveing ');
+    % axis([ 0 11 0 1.5]), grid on;
+end
+ ber_snr = [ber_snr BER];
+end   
